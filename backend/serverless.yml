@@ -1,0 +1,121 @@
+service: my-backend
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: ap-southeast-1
+  stage: dev
+
+plugins:
+  - serverless-offline
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    target: node18
+    platform: node
+    exclude: ['aws-sdk']
+
+
+functions:
+  login:
+    handler: src/api/auth/login.handler
+    events:
+      - http:
+          path: auth/login
+          method: post
+
+  verifyOtp:
+    handler: src/api/auth/verifyOtp.handler
+    events:
+      - http:
+          path: auth/verifyOtp
+          method: post
+
+  startDeposit:
+    handler: src/api/deposit/start.handler
+    events:
+      - http:
+          path: deposit/start
+          method: post
+
+  uploadDepositImages:
+    handler: src/api/deposit/upload-image.handler
+    events:
+      - http:
+          path: deposit/upload-image
+          method: post
+
+  acknowledgeDeposit:
+    handler: src/api/deposit/acknowledge.handler
+    events:
+      - http:
+          path: deposit/acknowledge
+          method: post
+  
+  startWithdrawal:
+    handler: src/api/withdrawal/start.handler
+    events:
+      - http:
+          path: withdrawal/start
+          method: post
+
+  uploadWithdrawalImages:
+    handler: src/api/withdrawal/upload-image.handler
+    events:
+      - http:
+          path: withdrawal/upload-image
+          method: post
+  
+  notifyInvestigator:
+    handler: src/api/withdrawal/notify-investigator.handler
+    events:
+      - http:
+          path: withdrawal/notify-investigator
+          method: post
+
+  confirmWithdrawal:
+    handler: src/api/withdrawal/confirm.handler
+    events:
+      - http:
+          path: withdrawal/confirm
+          method: post
+  
+  completeWithdrawal:
+    handler: src/api/withdrawal/retrieve.handler
+    events:
+      - http:
+          path: withdrawal/retrieve
+          method: post
+
+  superAdminLogin:
+    handler: src/api/auth/superAdminLogin.superAdminLogin
+    events:
+      - http:
+          path: auth/superAdminLogin
+          method: post
+          cors: true
+
+  loginWithOtp:
+    handler: src/api/auth/loginWithOtp.handler
+    events:
+      - http:
+          path: auth/loginWithOtp
+          method: post
+  
+  completeDeposit:
+    handler: src/api/deposit/complete.handler
+    events:
+      - http:
+          path: deposit/complete
+          method: post
+  
+  getActivityLogs:
+    handler: src/api/activity/activityLog.handler
+    events:
+      - http:
+          path: activity/activityLog
+          method: get
+          cors: true

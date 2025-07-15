@@ -1,0 +1,107 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  divisionPass String   @unique
+  name         String
+  role         Role
+  email        String   @unique
+  password     String?
+  otpCode      String?     // for OTP auth
+  otpExpiresAt DateTime?   // expiry of OTP
+  createdAt    DateTime @default(now())
+
+  deposits     Deposit[]    @relation("Depositor")
+  withdrawals  Withdrawal[] @relation("Withdrawer")
+
+  activityLogs ActivityLog[]
+}
+
+model Locker {
+  id        String        @id @default(uuid())
+  number    Int           @unique
+  status    LockerStatus  @default(AVAILABLE)
+  location  String?
+  createdAt DateTime      @default(now())
+
+  deposits     Deposit[]      // changed from Deposit?
+  withdrawals  Withdrawal[]   // changed from Withdrawal?
+  activityLogs ActivityLog[]
+}
+
+model Deposit {
+  id              String   @id @default(uuid())
+  seizureReportNo String
+  itemDescription String?
+  remarks         String?
+  frontImageUrl   String?
+  backImageUrl    String?
+  signature       String?
+  createdAt       DateTime @default(now())
+
+  userId   String
+  lockerId String              // removed @unique
+
+  user     User   @relation("Depositor", fields: [userId], references: [id])
+  locker   Locker @relation(fields: [lockerId], references: [id])
+}
+
+model Withdrawal {
+  id                    String   @id @default(uuid())
+  seizureReportNo       String
+  frontImageUrl         String?
+  backImageUrl          String?
+  retrieveFrontImageUrl String?
+  retrieveBackImageUrl  String?
+  signature             String?
+  createdAt             DateTime @default(now())
+
+  userId   String
+  lockerId String              // removed @unique
+
+  user     User   @relation("Withdrawer", fields: [userId], references: [id])
+  locker   Locker @relation(fields: [lockerId], references: [id])
+}
+
+model ActivityLog {
+  id        String       @id @default(uuid())
+  userId    String
+  lockerId  String
+  type      ActivityType
+  timestamp DateTime     @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  locker Locker @relation(fields: [lockerId], references: [id])
+}
+
+enum Role {
+  INVESTIGATOR
+  CASE_STORE_OFFICER
+  SUPER_ADMIN
+}
+
+enum LockerStatus {
+  AVAILABLE
+  ALLOCATED
+  OCCUPIED
+}
+
+enum ActivityType {
+  DEPOSIT
+  WITHDRAWAL
+  COLLECTION
+  ACCESS
+}
