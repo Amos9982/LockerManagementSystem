@@ -4,16 +4,16 @@ import { notifyInvestigator } from '../../services/withdrawal.service';
 export const handler: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
-    const { investigatorDivisionPass, seizureReportNumber, lockerNumber } = body;
+    const { seizureReportNumber, lockerNumber } = body;
 
-    if (!investigatorDivisionPass || !seizureReportNumber || lockerNumber == null) {
+    if (!seizureReportNumber || lockerNumber == null) {
       return {
         statusCode: 400,
         body: JSON.stringify({ error: 'Missing required fields' }),
       };
     }
 
-    const result = await notifyInvestigator({ investigatorDivisionPass, seizureReportNumber, lockerNumber });
+    const result = await notifyInvestigator({ seizureReportNumber, lockerNumber });
 
     return {
       statusCode: 200,

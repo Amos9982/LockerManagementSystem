@@ -3,7 +3,10 @@ import { isLockerAvailable } from '../utils/lockerUtils';
 import { StartDepositRequest, AcknowledgeDepositRequest } from '../types/deposit';
 import { LockerStatus, Role, ActivityType } from '@prisma/client';
 import { sendEmail } from './email.service';
-import { getDepositNotificationEmail } from '../utils/emailTemplates';
+import {
+  getDepositNotificationEmail,
+  getInvestigatorDepositConfirmationEmail
+} from '../utils/emailTemplates';
 import { createActivityLog } from './activityLog.service';
 
 export async function startDepositSession(input: StartDepositRequest) {
@@ -71,19 +74,34 @@ export async function acknowledgeDeposit(input: AcknowledgeDepositRequest) {
     },
   });
 
-  const emailBody = getDepositNotificationEmail({
-    investigatorName: deposit.user.name,
+  // Send to Investigator
+  const investigatorEmailBody = getInvestigatorDepositConfirmationEmail({
     lockerNumber: deposit.locker.number,
     seizureReportNo: deposit.seizureReportNo,
+    depositId: deposit.id,
   });
+  await sendEmail(
+    deposit.user.email,
+    'Deposit Completed Confirmation',
+    investigatorEmailBody
+  );
 
+  // Send to CSOs
   const caseStoreOfficers = await prisma.user.findMany({
     where: { role: Role.CASE_STORE_OFFICER },
   });
-  const recipients = [deposit.user.email, ...caseStoreOfficers.map(u => u.email)];
-
-  for (const to of recipients) {
-    await sendEmail(to, 'Exhibit Deposited Notification', emailBody);
+  const csoEmailBody = getDepositNotificationEmail({
+    investigatorName: deposit.user.name,
+    lockerNumber: deposit.locker.number,
+    seizureReportNo: deposit.seizureReportNo,
+    depositId: deposit.id,
+  });
+  for (const cso of caseStoreOfficers) {
+    await sendEmail(
+      cso.email,
+      'Exhibit Deposited Notification',
+      csoEmailBody
+    );
   }
 
   return { message: 'Deposit acknowledged and emails sent.' };

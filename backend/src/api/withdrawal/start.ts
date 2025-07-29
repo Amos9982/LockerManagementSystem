@@ -4,13 +4,12 @@ import { startWithdrawalSession } from '../../services/withdrawal.service';
 export const handler: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
-    const { divisionPass, seizureReportNumber, investigatorDivisionPass, lockerNumber } = body;
+    const { divisionPass, seizureReportNumber, lockerNumber } = body;
 
     const lockerNumberInt = parseInt(lockerNumber, 10);
     if (
       !divisionPass || 
       !seizureReportNumber || 
-      !investigatorDivisionPass || 
       isNaN(lockerNumberInt)
     ) {
       return {
@@ -22,7 +21,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const result = await startWithdrawalSession({ 
       divisionPass, 
       seizureReportNumber, 
-      investigatorDivisionPass, 
+      //investigatorDivisionPass, 
       lockerNumber: lockerNumberInt 
     });
 

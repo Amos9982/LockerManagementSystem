@@ -1,7 +1,6 @@
 export interface StartWithdrawalRequest {
   divisionPass: string;
   seizureReportNumber: string;
-  investigatorDivisionPass: string;
   lockerNumber: number;
 }
 
@@ -12,7 +11,6 @@ export interface UploadWithdrawalImagesRequest {
 }
 
 export interface NotifyInvestigatorRequest {
-  investigatorDivisionPass: string;
   seizureReportNumber: string;
   lockerNumber: number;
 }

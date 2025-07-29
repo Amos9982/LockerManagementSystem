@@ -1,98 +1,134 @@
-import { startDepositSession, acknowledgeDeposit } from '../services/deposit.service';
+import {
+  startDepositSession,
+  acknowledgeDeposit,
+  uploadDepositImages,
+  completeDeposit
+} from '../services/deposit.service';
 import { prisma } from '../models/prisma/client';
 import * as emailService from '../services/email.service';
+import * as activityLogService from '../services/activityLog.service';
 
-// Mock prisma client methods
 jest.mock('../models/prisma/client', () => ({
   prisma: {
     user: { findUnique: jest.fn(), findMany: jest.fn() },
     locker: { findUnique: jest.fn(), update: jest.fn() },
     deposit: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
-    activityLog: { create: jest.fn() },
   },
 }));
 
-// Mock sendEmail so it doesn't send real emails during tests
-jest.spyOn(emailService, 'sendEmail').mockImplementation(() => Promise.resolve());
+jest.mock('../services/email.service', () => ({
+  sendEmail: jest.fn().mockResolvedValue(undefined),
+}));
 
-describe('startDepositSession', () => {
-  // Added lockerNumber to match StartDepositRequest type
-  const validInput = {
-    divisionPass: 'INV123',
-    seizureReportNumber: 'SR001',
-    lockerId: 'LOCKER1',
-    lockerNumber: 1, // <--- required field added here
-  };
+jest.mock('../services/activityLog.service', () => ({
+  createActivityLog: jest.fn().mockResolvedValue(undefined),
+}));
 
-  it('should throw if user not found', async () => {
-    (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
-
-    await expect(startDepositSession(validInput))
-      .rejects
-      .toThrow('Invalid division pass');
+describe('deposit.service', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
-  it('should throw if locker is not available', async () => {
-    (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'U1' });
-    (prisma.locker.findUnique as jest.Mock).mockResolvedValue({ status: 'OCCUPIED' });
+  describe('startDepositSession', () => {
+    const input = { divisionPass: 'DP123', seizureReportNumber: 'SR001', lockerNumber: 1 };
 
-    await expect(startDepositSession(validInput))
-      .rejects
-      .toThrow('Locker is not available');
-  });
-
-  it('should create deposit and update locker on success', async () => {
-    (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'U1' });
-    (prisma.locker.findUnique as jest.Mock).mockResolvedValue({ id: 'L1', status: 'AVAILABLE' });
-    (prisma.deposit.create as jest.Mock).mockResolvedValue({ id: 'D1' });
-    (prisma.activityLog.create as jest.Mock).mockResolvedValue({});
-
-    const result = await startDepositSession(validInput);
-
-    expect(result).toMatchObject({
-      depositId: 'D1',
-      lockerId: 'L1',
-      userId: 'U1',
-      message: 'Deposit session started successfully',
-    });
-  });
-});
-
-describe('acknowledgeDeposit', () => {
-  it('should throw if deposit not found', async () => {
-    (prisma.deposit.findUnique as jest.Mock).mockResolvedValue(null);
-
-    await expect(
-      acknowledgeDeposit({ depositId: 'nonexistent', itemDescription: 'Test', signatureData: 'abc' })
-    ).rejects.toThrow('Deposit not found');
-  });
-
-  it('should update deposit and send email', async () => {
-    // Mock deposit with nested user and locker data (needed for email)
-    (prisma.deposit.findUnique as jest.Mock).mockResolvedValue({ 
-      id: 'deposit1', 
-      userId: 'user1', 
-      lockerId: 'locker1', 
-      seizureReportNo: 'SR001',
-      user: { name: 'John', email: 'john@example.com' },
-      locker: { number: 1 },
+    it('throws if user not found', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(startDepositSession(input)).rejects.toThrow('Invalid division pass');
     });
 
-    (prisma.deposit.update as jest.Mock).mockResolvedValue({});
-    (prisma.locker.update as jest.Mock).mockResolvedValue({});
-    (prisma.activityLog.create as jest.Mock).mockResolvedValue({});
+    it('throws if locker unavailable', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'U1' });
+      (prisma.locker.findUnique as jest.Mock).mockResolvedValue({ status: 'OCCUPIED' });
+      await expect(startDepositSession(input)).rejects.toThrow('Locker is not available');
+    });
 
-    // Mock findMany to simulate Case Store Officers for email recipients
-    (prisma.user.findMany as jest.Mock).mockResolvedValue([
-      { email: 'cso1@example.com' },
-      { email: 'cso2@example.com' },
-    ]);
+    it('creates deposit and updates locker', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'U1' });
+      (prisma.locker.findUnique as jest.Mock).mockResolvedValue({ id: 'L1', status: 'AVAILABLE' });
+      (prisma.deposit.create as jest.Mock).mockResolvedValue({ id: 'D1' });
 
-    await acknowledgeDeposit({ depositId: 'deposit1', itemDescription: 'Item A', signatureData: 'sig' });
+      const result = await startDepositSession(input);
 
-    expect(emailService.sendEmail).toHaveBeenCalled();
-    expect(prisma.deposit.update).toHaveBeenCalled();
-    expect(prisma.locker.update).toHaveBeenCalled();
-    expect(prisma.activityLog.create).toHaveBeenCalled();
+      expect(result).toEqual({
+        depositId: 'D1',
+        lockerId: 'L1',
+        userId: 'U1',
+        message: 'Deposit session started successfully',
+      });
+      expect(prisma.deposit.create).toHaveBeenCalled();
+      expect(prisma.locker.update).toHaveBeenCalled();
+      expect(activityLogService.createActivityLog).toHaveBeenCalled();
+    });
+  });
+
+  describe('acknowledgeDeposit', () => {
+    it('throws if deposit not found', async () => {
+      (prisma.deposit.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(
+        acknowledgeDeposit({ depositId: 'D1', itemDescription: 'desc', signatureData: 'sig' })
+      ).rejects.toThrow('Deposit not found');
+    });
+
+    it('updates deposit and sends emails', async () => {
+      (prisma.deposit.findUnique as jest.Mock).mockResolvedValue({
+        id: 'D1',
+        seizureReportNo: 'SR001',
+        user: { name: 'John', email: 'john@example.com' },
+        locker: { number: 1 },
+      });
+      (prisma.deposit.update as jest.Mock).mockResolvedValue({});
+      (prisma.user.findMany as jest.Mock).mockResolvedValue([
+        { email: 'cso1@example.com' },
+        { email: 'cso2@example.com' },
+      ]);
+
+      await acknowledgeDeposit({ depositId: 'D1', itemDescription: 'desc', signatureData: 'sig' });
+
+      expect(prisma.deposit.update).toHaveBeenCalled();
+      expect(emailService.sendEmail).toHaveBeenCalled();
+    });
+  });
+
+  describe('uploadDepositImages', () => {
+    it('throws if deposit not found', async () => {
+      (prisma.deposit.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(uploadDepositImages('D1', 'front.jpg', 'back.jpg')).rejects.toThrow('Deposit not found');
+    });
+
+    it('updates deposit images', async () => {
+      (prisma.deposit.findUnique as jest.Mock).mockResolvedValue({ id: 'D1' });
+      (prisma.deposit.update as jest.Mock).mockResolvedValue({});
+      await uploadDepositImages('D1', 'front.jpg', 'back.jpg');
+
+      expect(prisma.deposit.update).toHaveBeenCalledWith({
+        where: { id: 'D1' },
+        data: { frontImageUrl: 'front.jpg', backImageUrl: 'back.jpg' },
+      });
+    });
+  });
+
+  describe('completeDeposit', () => {
+    it('throws if CSO not found', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(null);
+      await expect(completeDeposit('D1', 'CSO123')).rejects.toThrow('Unauthorized: Not a Case Store Officer');
+    });
+
+    it('throws if user is not CSO', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({ role: 'INVESTIGATOR' });
+      await expect(completeDeposit('D1', 'CSO123')).rejects.toThrow('Unauthorized: Not a Case Store Officer');
+    });
+
+    it('updates locker and logs activity', async () => {
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({ id: 'CSO1', role: 'CASE_STORE_OFFICER' });
+      (prisma.deposit.findUnique as jest.Mock).mockResolvedValue({ lockerId: 'L1' });
+      (prisma.locker.update as jest.Mock).mockResolvedValue({});
+
+      const result = await completeDeposit('D1', 'CSO123');
+
+      expect(result.message).toMatch(/Locker status updated/i);
+      expect(prisma.locker.update).toHaveBeenCalled();
+      expect(activityLogService.createActivityLog).toHaveBeenCalled();
+    });
   });
 });

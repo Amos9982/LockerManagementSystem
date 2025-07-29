@@ -16,16 +16,11 @@ interface ConfirmWithdrawalRequest {
 }
 
 export async function startWithdrawalSession(input: StartWithdrawalRequest) {
-  const { divisionPass, seizureReportNumber, investigatorDivisionPass, lockerNumber } = input;
+  const { divisionPass, seizureReportNumber, lockerNumber } = input;
 
   const cso = await prisma.user.findUnique({ where: { divisionPass } });
   if (!cso || cso.role !== Role.CASE_STORE_OFFICER) {
     throw new Error('Unauthorized: Not a Case Store Officer');
-  }
-
-  const investigator = await prisma.user.findUnique({ where: { divisionPass: investigatorDivisionPass } });
-  if (!investigator || investigator.role !== Role.INVESTIGATOR) {
-    throw new Error('Investigator not found');
   }
 
   // Find the locker by the specified number
@@ -42,7 +37,7 @@ export async function startWithdrawalSession(input: StartWithdrawalRequest) {
   const withdrawal = await prisma.withdrawal.create({
     data: {
       seizureReportNo: seizureReportNumber,
-      userId: investigator.id,
+      userId: cso.id,
       lockerId: locker.id,
     },
   });
@@ -56,7 +51,7 @@ export async function startWithdrawalSession(input: StartWithdrawalRequest) {
   return {
     withdrawalId: withdrawal.id,
     lockerNumber: locker.number,
-    message: 'Withdrawal session started for Investigator',
+    message: 'Withdrawal session started for Case Store Officer',
   };
 }
 
@@ -73,24 +68,44 @@ export async function uploadWithdrawalImages(input: UploadWithdrawalImagesReques
 }
 
 export async function notifyInvestigator(input: NotifyInvestigatorRequest) {
-  const { investigatorDivisionPass, seizureReportNumber, lockerNumber } = input;
+  const { seizureReportNumber, lockerNumber } = input;
 
-  const investigator = await prisma.user.findUnique({ where: { divisionPass: investigatorDivisionPass } });
-  if (!investigator) throw new Error('Investigator not found');
+  // Find deposit by seizureReportNumber
+  const deposit = await prisma.deposit.findFirst({
+    where: { seizureReportNo: seizureReportNumber },
+    include: { user: true }, // get the investigator user who deposited
+  });
+  if (!deposit || !deposit.user) {
+    throw new Error('Investigator (from deposit) not found');
+  }
 
+  const investigator = deposit.user;
+
+  // Find locker
   const locker = await prisma.locker.findUnique({ where: { number: lockerNumber } });
   if (!locker) throw new Error('Locker not found');
 
+  // Find existing withdrawal
+  const withdrawal = await prisma.withdrawal.findFirst({
+    where: { seizureReportNo: seizureReportNumber },
+  });
+  if (!withdrawal) {
+    throw new Error('Withdrawal not found for this seizure report number');
+  }
+
+  // Send email with withdrawalId
   const emailBody = getWithdrawalNotificationEmail({
     investigatorName: investigator.name,
     seizureReportNo: seizureReportNumber,
     lockerNumber: locker.number,
+    withdrawalId: withdrawal.id, // add this param to template
   });
 
   await sendEmail(investigator.email, 'Exhibit Ready for Collection', emailBody);
 
-  return { message: 'Email notification sent to investigator' };
+  return { message: 'Email notification sent to investigator', withdrawalId: withdrawal.id };
 }
+
 
 export async function confirmWithdrawal(input: ConfirmWithdrawalRequest) {
   const { divisionPass, lockerNumber } = input;
@@ -140,13 +155,26 @@ export async function completeWithdrawal(input: RetrieveWithdrawalRequest) {
   const caseStoreOfficers = await prisma.user.findMany({
     where: { role: Role.CASE_STORE_OFFICER },
   });
-  const recipients = [withdrawal.user.email, ...caseStoreOfficers.map((u) => u.email)];
+  //const recipients = [withdrawal.user.email, ...caseStoreOfficers.map((u) => u.email)];
 
+  // Find the investigator who deposited originally
+  const deposit = await prisma.deposit.findFirst({
+    where: { seizureReportNo: withdrawal.seizureReportNo },
+    include: { user: true }, // assuming Deposit.userId -> User
+  });
+
+  const investigatorEmail = deposit?.user?.email;
+
+  const recipients = [
+    ...(investigatorEmail ? [investigatorEmail] : []),
+    ...caseStoreOfficers.map(u => u.email)
+  ].filter(Boolean);
+  
   const emailBody = `
-    Exhibit has been withdrawn by ${withdrawal.user.name} (Division Pass: ${withdrawal.user.divisionPass})<br>
-    Locker: ${withdrawal.locker.number}<br>
-    Seizure Report No: ${withdrawal.seizureReportNo}
-  `;
+  Exhibit has been withdrawn by ${withdrawal.user.name} (Division Pass: ${withdrawal.user.divisionPass})
+  Locker: ${withdrawal.locker.number}
+  Seizure Report No: ${withdrawal.seizureReportNo}
+  `.trim();
 
   for (const to of recipients) {
     await sendEmail(to, 'Exhibit Withdrawal Notification', emailBody);
